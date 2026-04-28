@@ -39,9 +39,8 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
 5. Customize the copied `WORKFLOW.md` file for your project.
    - To get your project's slug, right-click the project and copy its URL. The slug is part of the
      URL.
-   - When creating a workflow based on this repo, note that it depends on non-standard Linear
-     issue statuses: "Rework", "Human Review", and "Merging". You can customize them in
-     Team Settings → Workflow in Linear.
+   - The reference workflow in this repo assumes the states `Todo`, `In Progress`, `In Review`,
+     `Ready to Merge`, and `Done`.
 6. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
@@ -58,12 +57,15 @@ mise exec -- elixir --version
 ```bash
 git clone https://github.com/openai/symphony
 cd symphony/elixir
+cp .env.example .env
 mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
 mise exec -- ./bin/symphony ./WORKFLOW.md
 ```
+
+`./bin/symphony` automatically loads `.env` from the workflow directory when present.
 
 ## Configuration
 
@@ -89,12 +91,13 @@ Minimal example:
 ---
 tracker:
   kind: linear
-  project_slug: "..."
+  api_key: $LINEAR_API_KEY
+  project_slug: $LINEAR_PROJECT_SLUG
 workspace:
   root: ~/code/workspaces
 hooks:
   after_create: |
-    git clone git@github.com:your-org/your-repo.git .
+    git clone --depth 1 "$SOURCE_REPO_URL" .
 agent:
   max_concurrent_agents: 10
   max_turns: 20
@@ -128,6 +131,8 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- `tracker.project_slug` reads from `LINEAR_PROJECT_SLUG` when unset or when value is
+  `$LINEAR_PROJECT_SLUG`.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the
@@ -136,6 +141,7 @@ Notes:
 ```yaml
 tracker:
   api_key: $LINEAR_API_KEY
+  project_slug: $LINEAR_PROJECT_SLUG
 workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
@@ -181,6 +187,8 @@ cd elixir
 export LINEAR_API_KEY=...
 make e2e
 ```
+
+`make e2e` does not load `.env`; export required variables in your shell first.
 
 Optional environment variables:
 

@@ -11,6 +11,7 @@ defmodule SymphonyElixir.CLI do
   @type ensure_started_result :: {:ok, [atom()]} | {:error, term()}
   @type deps :: %{
           file_regular?: (String.t() -> boolean()),
+          load_dotenv: (String.t() -> :ok | {:error, term()}),
           set_workflow_file_path: (String.t() -> :ok | {:error, term()}),
           set_logs_root: (String.t() -> :ok | {:error, term()}),
           set_server_port_override: (non_neg_integer() | nil -> :ok | {:error, term()}),
@@ -56,14 +57,15 @@ defmodule SymphonyElixir.CLI do
     expanded_path = Path.expand(workflow_path)
 
     if deps.file_regular?.(expanded_path) do
-      :ok = deps.set_workflow_file_path.(expanded_path)
+      with :ok <- deps.load_dotenv.(Path.dirname(expanded_path)),
+           :ok <- deps.set_workflow_file_path.(expanded_path) do
+        case deps.ensure_all_started.() do
+          {:ok, _started_apps} ->
+            :ok
 
-      case deps.ensure_all_started.() do
-        {:ok, _started_apps} ->
-          :ok
-
-        {:error, reason} ->
-          {:error, "Failed to start Symphony with workflow #{expanded_path}: #{inspect(reason)}"}
+          {:error, reason} ->
+            {:error, "Failed to start Symphony with workflow #{expanded_path}: #{inspect(reason)}"}
+        end
       end
     else
       {:error, "Workflow file not found: #{expanded_path}"}
@@ -79,11 +81,93 @@ defmodule SymphonyElixir.CLI do
   defp runtime_deps do
     %{
       file_regular?: &File.regular?/1,
+      load_dotenv: &load_dotenv/1,
       set_workflow_file_path: &SymphonyElixir.Workflow.set_workflow_file_path/1,
       set_logs_root: &set_logs_root/1,
       set_server_port_override: &set_server_port_override/1,
       ensure_all_started: fn -> Application.ensure_all_started(:symphony_elixir) end
     }
+  end
+
+  @spec load_dotenv(String.t()) :: :ok | {:error, String.t()}
+  defp load_dotenv(dir_path) when is_binary(dir_path) do
+    dotenv_path = Path.join(dir_path, ".env")
+
+    case File.read(dotenv_path) do
+      {:ok, content} ->
+        content
+        |> String.split(~r/\R/, trim: false)
+        |> Enum.reduce_while(:ok, fn line, :ok ->
+          case parse_dotenv_line(line) do
+            :skip ->
+              {:cont, :ok}
+
+            {:ok, key, value} ->
+              if is_nil(System.get_env(key)) do
+                System.put_env(key, value)
+              end
+
+              {:cont, :ok}
+
+            {:error, reason} ->
+              {:halt, {:error, "Invalid .env at #{dotenv_path}: #{reason}"}}
+          end
+        end)
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Failed to load .env at #{dotenv_path}: #{inspect(reason)}"}
+    end
+  end
+
+  defp parse_dotenv_line(line) when is_binary(line) do
+    trimmed = String.trim(line)
+
+    cond do
+      trimmed == "" ->
+        :skip
+
+      String.starts_with?(trimmed, "#") ->
+        :skip
+
+      true ->
+        case Regex.run(~r/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/, trimmed) do
+          [_, key, raw_value] ->
+            {:ok, key, normalize_dotenv_value(raw_value)}
+
+          _ ->
+            {:error, "could not parse line #{inspect(line)}"}
+        end
+    end
+  end
+
+  defp normalize_dotenv_value(raw_value) when is_binary(raw_value) do
+    value = String.trim(raw_value)
+
+    case value do
+      "\"" <> rest ->
+        rest
+        |> String.trim_trailing("\"")
+        |> String.replace("\\n", "\n")
+        |> String.replace("\\\"", "\"")
+
+      "'" <> rest ->
+        String.trim_trailing(rest, "'")
+
+      _ ->
+        value
+        |> strip_unquoted_inline_comment()
+        |> String.trim()
+    end
+  end
+
+  defp strip_unquoted_inline_comment(value) do
+    case String.split(value, ~r/\s+#/, parts: 2) do
+      [head, _comment] -> head
+      [head] -> head
+    end
   end
 
   defp maybe_set_logs_root(opts, deps) do

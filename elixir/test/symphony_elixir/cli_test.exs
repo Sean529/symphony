@@ -13,6 +13,10 @@ defmodule SymphonyElixir.CLITest do
         send(parent, :file_checked)
         true
       end,
+      load_dotenv: fn _path ->
+        send(parent, :dotenv_loaded)
+        :ok
+      end,
       set_workflow_file_path: fn _path ->
         send(parent, :workflow_set)
         :ok
@@ -40,12 +44,14 @@ defmodule SymphonyElixir.CLITest do
     refute_received :workflow_set
     refute_received :logs_root_set
     refute_received :port_set
+    refute_received :dotenv_loaded
     refute_received :started
   end
 
   test "defaults to WORKFLOW.md when workflow path is missing" do
     deps = %{
       file_regular?: fn path -> Path.basename(path) == "WORKFLOW.md" end,
+      load_dotenv: fn _path -> :ok end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
       set_server_port_override: fn _port -> :ok end,
@@ -65,6 +71,10 @@ defmodule SymphonyElixir.CLITest do
         send(parent, {:workflow_checked, path})
         path == expanded_path
       end,
+      load_dotenv: fn path ->
+        send(parent, {:dotenv_loaded, path})
+        :ok
+      end,
       set_workflow_file_path: fn path ->
         send(parent, {:workflow_set, path})
         :ok
@@ -76,6 +86,8 @@ defmodule SymphonyElixir.CLITest do
 
     assert :ok = CLI.evaluate([@ack_flag, workflow_path], deps)
     assert_received {:workflow_checked, ^expanded_path}
+    assert_received {:dotenv_loaded, loaded_dir}
+    assert loaded_dir == Path.dirname(expanded_path)
     assert_received {:workflow_set, ^expanded_path}
   end
 
@@ -84,6 +96,7 @@ defmodule SymphonyElixir.CLITest do
 
     deps = %{
       file_regular?: fn _path -> true end,
+      load_dotenv: fn _path -> :ok end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn path ->
         send(parent, {:logs_root, path})
@@ -101,6 +114,7 @@ defmodule SymphonyElixir.CLITest do
   test "returns not found when workflow file does not exist" do
     deps = %{
       file_regular?: fn _path -> false end,
+      load_dotenv: fn _path -> :ok end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
       set_server_port_override: fn _port -> :ok end,
@@ -114,6 +128,7 @@ defmodule SymphonyElixir.CLITest do
   test "returns startup error when app cannot start" do
     deps = %{
       file_regular?: fn _path -> true end,
+      load_dotenv: fn _path -> :ok end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
       set_server_port_override: fn _port -> :ok end,
@@ -128,6 +143,7 @@ defmodule SymphonyElixir.CLITest do
   test "returns ok when workflow exists and app starts" do
     deps = %{
       file_regular?: fn _path -> true end,
+      load_dotenv: fn _path -> :ok end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
       set_server_port_override: fn _port -> :ok end,
