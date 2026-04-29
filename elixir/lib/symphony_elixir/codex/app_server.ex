@@ -517,7 +517,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             metadata
           )
 
-          Logger.debug("Codex notification: #{inspect(method)}")
+          log_codex_notification(method, payload_string)
           receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
         end
     end
@@ -961,6 +961,20 @@ defmodule SymphonyElixir.Codex.AppServer do
         log_non_json_stream_line(payload, "response stream")
         with_timeout_response(port, request_id, timeout_ms, "")
     end
+  end
+
+  defp log_codex_notification("error", payload_string) do
+    preview =
+      payload_string
+      |> to_string()
+      |> String.trim()
+      |> String.slice(0, @max_stream_log_bytes)
+
+    Logger.warning("Codex error notification: #{preview}")
+  end
+
+  defp log_codex_notification(method, _payload_string) do
+    Logger.debug("Codex notification: #{inspect(method)}")
   end
 
   defp log_non_json_stream_line(data, stream_label) do
